@@ -4,17 +4,17 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-package gerror
+package errors
 
-import "github.com/gogf/gf/v2/errors/gcode"
+import "github.com/bitini111/rpcx/errors/code"
 
 // Code returns the error code.
 // It returns CodeNil if it has no error code.
-func (err *Error) Code() gcode.Code {
+func (err *Error) Code() code.Code {
 	if err == nil {
-		return gcode.CodeNil
+		return code.CodeNil
 	}
-	if err.code == gcode.CodeNil {
+	if err.code == code.CodeNil {
 		return Code(err.Unwrap())
 	}
 	return err.code

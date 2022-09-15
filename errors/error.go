@@ -1,17 +1,6 @@
-// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
-// Package gerror provides rich functionalities to manipulate errors.
-//
-// For maintainers, please very note that,
-// this package is quite a basic package, which SHOULD NOT import extra packages
-// except standard packages and internal packages, to avoid cycle imports.
 package errors
 
-import "github.com/gogf/gf/v2/errors/gcode"
+import "github.com/bitini111/rpcx/errors/code"
 
 // IIs is the interface for Is feature.
 type IIs interface {
@@ -28,7 +17,7 @@ type IEqual interface {
 // ICode is the interface for Code feature.
 type ICode interface {
 	Error() string
-	Code() gcode.Code
+	Code() code.Code
 }
 
 // IStack is the interface for Stack feature.

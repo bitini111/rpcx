@@ -1,15 +1,8 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 package errors
 
 import (
 	"fmt"
-
-	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/bitini111/rpcx/errors/code"
 )
 
 // New creates and returns an error which is formatted from given text.
@@ -17,7 +10,7 @@ func New(text string) error {
 	return &Error{
 		stack: callers(),
 		text:  text,
-		code:  gcode.CodeNil,
+		code:  code.CodeNil,
 	}
 }
 
@@ -26,7 +19,7 @@ func Newf(format string, args ...interface{}) error {
 	return &Error{
 		stack: callers(),
 		text:  fmt.Sprintf(format, args...),
-		code:  gcode.CodeNil,
+		code:  code.CodeNil,
 	}
 }
 
@@ -36,7 +29,7 @@ func NewSkip(skip int, text string) error {
 	return &Error{
 		stack: callers(skip),
 		text:  text,
-		code:  gcode.CodeNil,
+		code:  code.CodeNil,
 	}
 }
 
@@ -46,7 +39,7 @@ func NewSkipf(skip int, format string, args ...interface{}) error {
 	return &Error{
 		stack: callers(skip),
 		text:  fmt.Sprintf(format, args...),
-		code:  gcode.CodeNil,
+		code:  code.CodeNil,
 	}
 }
 

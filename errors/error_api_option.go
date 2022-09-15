@@ -4,9 +4,9 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-package gerror
+package errors
 
-import "github.com/gogf/gf/v2/errors/gcode"
+import "github.com/bitini111/rpcx/errors/code"
 
 // Option is option for creating error.
 type Option struct {

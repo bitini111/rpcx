@@ -1,20 +1,13 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
-package gerror
+package errors
 
 import (
 	"fmt"
+	"github.com/bitini111/rpcx/errors/code"
 	"strings"
-
-	"github.com/gogf/gf/v2/errors/gcode"
 )
 
 // NewCode creates and returns an error that has error code and given text.
-func NewCode(code gcode.Code, text ...string) error {
+func NewCode(code code.Code, text ...string) error {
 	return &Error{
 		stack: callers(),
 		text:  strings.Join(text, ", "),

@@ -9,18 +9,17 @@ package errors
 import (
 	"errors"
 	"fmt"
+	"github.com/bitini111/rpcx/errors/code"
 	"runtime"
 	"strings"
-
-	"github.com/gogf/gf/v2/errors/gcode"
 )
 
 // Error is custom error for additional features.
 type Error struct {
-	error error      // Wrapped error.
-	stack stack      // Stack array, which records the stack information when this error is created or wrapped.
-	text  string     // Custom Error text when Error is created, might be empty when its code is not nil.
-	code  gcode.Code // Error code if necessary.
+	error error     // Wrapped error.
+	stack stack     // Stack array, which records the stack information when this error is created or wrapped.
+	text  string    // Custom Error text when Error is created, might be empty when its code is not nil.
+	code  code.Code // Error code if necessary.
 }
 
 const (
