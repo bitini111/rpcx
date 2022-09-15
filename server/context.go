@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/share"
 )
 
 // Context represents a rpcx FastCall context.
@@ -14,12 +14,12 @@ type Context struct {
 	req  *protocol.Message
 	ctx  *share.Context
 
-	writeCh chan *[]byte
+	async bool
 }
 
 // NewContext creates a server.Context for Handler.
-func NewContext(ctx *share.Context, conn net.Conn, req *protocol.Message, writeCh chan *[]byte) *Context {
-	return &Context{conn: conn, req: req, ctx: ctx, writeCh: writeCh}
+func NewContext(ctx *share.Context, conn net.Conn, req *protocol.Message, async bool) *Context {
+	return &Context{conn: conn, req: req, ctx: ctx, async: async}
 }
 
 // Get returns value for key.
@@ -33,6 +33,14 @@ func (ctx *Context) SetValue(key, val interface{}) {
 		return
 	}
 	ctx.ctx.SetValue(key, val)
+}
+
+// DeleteKey delete the kv pair by key.
+func (ctx *Context) DeleteKey(key interface{}) {
+	if ctx.ctx == nil || key == nil {
+		return
+	}
+	ctx.ctx.DeleteKey(key)
 }
 
 // Payload returns the  payload.
@@ -116,8 +124,11 @@ func (ctx *Context) Write(v interface{}) error {
 	respData := res.EncodeSlicePointer()
 
 	var err error
-	if ctx.writeCh != nil {
-		ctx.writeCh <- respData
+	if ctx.async {
+		go func() {
+			_, err = ctx.conn.Write(*respData)
+			protocol.PutData(respData)
+		}()
 	} else {
 		_, err = ctx.conn.Write(*respData)
 		protocol.PutData(respData)

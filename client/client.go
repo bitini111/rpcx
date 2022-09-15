@@ -13,12 +13,10 @@ import (
 	"sync"
 	"time"
 
-	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/bitini111/rpcx/log"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/share"
 	circuit "github.com/rubyist/circuitbreaker"
-	"github.com/smallnest/rpcx/log"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
-	"go.opencensus.io/trace"
 )
 
 const (
@@ -36,10 +34,21 @@ const (
 )
 
 // ServiceError is an error from server.
-type ServiceError string
+type ServiceError interface {
+	Error() string
+	IsServiceError() bool
+}
 
-func (e ServiceError) Error() string {
-	return string(e)
+var ClientErrorFunc func(e string) ServiceError
+
+type strErr string
+
+func (s strErr) Error() string {
+	return string(s)
+}
+
+func (s strErr) IsServiceError() bool {
+	return true
 }
 
 // DefaultOption is a common option configuration for client.
@@ -52,6 +61,7 @@ var DefaultOption = Option{
 	BackupLatency:       10 * time.Millisecond,
 	MaxWaitForHeartbeat: 30 * time.Second,
 	TCPKeepAlivePeriod:  time.Minute,
+	BidirectionalBlock:  false,
 }
 
 // Breaker is a CircuitBreaker interface.
@@ -115,8 +125,7 @@ type Client struct {
 
 	Plugins PluginContainer
 
-	ServerMessageChanMu sync.RWMutex
-	ServerMessageChan   chan<- *protocol.Message
+	ServerMessageChan chan<- *protocol.Message
 }
 
 // NewClient returns a new Client with the option.
@@ -127,13 +136,13 @@ func NewClient(option Option) *Client {
 }
 
 // RemoteAddr returns the remote address.
-func (c *Client) RemoteAddr() string {
-	return c.Conn.RemoteAddr().String()
+func (client *Client) RemoteAddr() string {
+	return client.Conn.RemoteAddr().String()
 }
 
 // GetConn returns the underlying conn.
-func (c *Client) GetConn() net.Conn {
-	return c.Conn
+func (client *Client) GetConn() net.Conn {
+	return client.Conn
 }
 
 // Option contains all options for creating clients.
@@ -153,7 +162,7 @@ type Option struct {
 	RPCPath string
 	// ConnectTimeout sets timeout for dialing
 	ConnectTimeout time.Duration
-	// ReadTimeout sets max idle time for underlying net.Conns
+	// IdleTimeout sets max idle time for underlying net.Conns
 	IdleTimeout time.Duration
 
 	// BackupLatency is used for Failbackup mode. rpcx will sends another request if the first response doesn't return in BackupLatency time.
@@ -173,6 +182,8 @@ type Option struct {
 
 	// TCPKeepAlive, if it is zero we don't set keepalive
 	TCPKeepAlivePeriod time.Duration
+	// bidirectional mode, if true serverMessageChan will block to wait message for consume. default false.
+	BidirectionalBlock bool
 }
 
 // Call represents an active RPC.
@@ -200,16 +211,12 @@ func (call *Call) done() {
 
 // RegisterServerMessageChan registers the channel that receives server requests.
 func (client *Client) RegisterServerMessageChan(ch chan<- *protocol.Message) {
-	client.ServerMessageChanMu.Lock()
 	client.ServerMessageChan = ch
-	client.ServerMessageChanMu.Unlock()
 }
 
 // UnregisterServerMessageChan removes ServerMessageChan.
 func (client *Client) UnregisterServerMessageChan() {
-	client.ServerMessageChanMu.Lock()
 	client.ServerMessageChan = nil
-	client.ServerMessageChanMu.Unlock()
 }
 
 // IsClosing client is closing or not.
@@ -239,13 +246,9 @@ func (client *Client) Go(ctx context.Context, servicePath, serviceMethod string,
 		call.Metadata = meta.(map[string]string)
 	}
 
-	if _, ok := ctx.(*share.Context); !ok {
+	if !share.IsShareContext(ctx) {
 		ctx = share.NewContext(ctx)
 	}
-
-	// TODO: should implement as plugin
-	client.injectOpenTracingSpan(ctx, call)
-	client.injectOpenCensusSpan(ctx, call)
 
 	call.Args = args
 	call.Reply = reply
@@ -265,61 +268,10 @@ func (client *Client) Go(ctx context.Context, servicePath, serviceMethod string,
 	if share.Trace {
 		log.Debugf("client.Go send request for %s.%s, args: %+v in case of client call", servicePath, serviceMethod, args)
 	}
-	client.send(ctx, call)
+
+	go client.send(ctx, call)
+
 	return call
-}
-
-func (client *Client) injectOpenTracingSpan(ctx context.Context, call *Call) {
-	var rpcxContext *share.Context
-	var ok bool
-	if rpcxContext, ok = ctx.(*share.Context); !ok {
-		return
-	}
-	sp := rpcxContext.Value(share.OpentracingSpanClientKey)
-	if sp == nil { // have not config opentracing plugin
-		return
-	}
-
-	span := sp.(opentracing.Span)
-	if call.Metadata == nil {
-		call.Metadata = make(map[string]string)
-	}
-	meta := call.Metadata
-
-	err := opentracing.GlobalTracer().Inject(
-		span.Context(),
-		opentracing.TextMap,
-		opentracing.TextMapCarrier(meta))
-	if err != nil {
-		log.Errorf("failed to inject span: %v", err)
-	}
-}
-
-func (client *Client) injectOpenCensusSpan(ctx context.Context, call *Call) {
-	var rpcxContext *share.Context
-	var ok bool
-	if rpcxContext, ok = ctx.(*share.Context); !ok {
-		return
-	}
-	sp := rpcxContext.Value(share.OpencensusSpanClientKey)
-	if sp == nil { // have not config opencensus plugin
-		return
-	}
-
-	span := sp.(*trace.Span)
-	if span == nil {
-		return
-	}
-	if call.Metadata == nil {
-		call.Metadata = make(map[string]string)
-	}
-	meta := call.Metadata
-
-	spanContext := span.SpanContext()
-	scData := make([]byte, 24)
-	copy(scData[:16], spanContext.TraceID[:])
-	copy(scData[16:24], spanContext.SpanID[:])
-	meta[share.OpencensusSpanRequestKey] = string(scData)
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
@@ -358,18 +310,29 @@ func (client *Client) call(ctx context.Context, servicePath, serviceMethod strin
 		meta := ctx.Value(share.ResMetaDataKey)
 		if meta != nil && len(call.ResMetadata) > 0 {
 			resMeta := meta.(map[string]string)
-			for k, v := range call.ResMetadata {
-				resMeta[k] = v
-			}
+			locker, ok := ctx.Value(share.ContextTagsLock).(*sync.Mutex)
+			if ok {
 
-			resMeta[share.ServerAddress] = client.Conn.RemoteAddr().String()
+				locker.Lock()
+				for k, v := range call.ResMetadata {
+					resMeta[k] = v
+				}
+				resMeta[share.ServerAddress] = client.Conn.RemoteAddr().String()
+				locker.Unlock()
+
+			} else {
+				for k, v := range call.ResMetadata {
+					resMeta[k] = v
+				}
+				resMeta[share.ServerAddress] = client.Conn.RemoteAddr().String()
+			}
 		}
 	}
 
 	return err
 }
 
-// SendRaw sends raw messages. You don't care args and replys.
+// SendRaw sends raw messages. You don't care args and replies.
 func (client *Client) SendRaw(ctx context.Context, r *protocol.Message) (map[string]string, []byte, error) {
 	ctx = context.WithValue(ctx, seqKey{}, r.Seq())
 
@@ -399,13 +362,9 @@ func (client *Client) SendRaw(ctx context.Context, r *protocol.Message) (map[str
 	}
 	r.Metadata = rmeta
 
-	if _, ok := ctx.(*share.Context); !ok {
+	if !share.IsShareContext(ctx) {
 		ctx = share.NewContext(ctx)
 	}
-
-	// TODO: should implement as plugin
-	client.injectOpenTracingSpan(ctx, call)
-	client.injectOpenCensusSpan(ctx, call)
 
 	done := make(chan *Call, 10)
 	call.Done = done
@@ -666,18 +625,23 @@ func (client *Client) input() {
 		switch {
 		case call == nil:
 			if isServerMessage {
-				client.ServerMessageChanMu.RLock()
 				if client.ServerMessageChan != nil {
 					client.handleServerRequest(res)
 				}
-				client.ServerMessageChanMu.RUnlock()
 				continue
 			}
 		case res.MessageStatusType() == protocol.Error:
 			// We've got an error response. Give this to the request
 			if len(res.Metadata) > 0 {
 				call.ResMetadata = res.Metadata
-				call.Error = ServiceError(res.Metadata[protocol.ServiceError])
+
+				// convert server error to a customized error, which implements ServerError interface
+				if ClientErrorFunc != nil {
+					call.Error = ClientErrorFunc(res.Metadata[protocol.ServiceError])
+				} else {
+					call.Error = strErr(res.Metadata[protocol.ServiceError])
+				}
+
 			}
 
 			if call.Raw {
@@ -699,11 +663,11 @@ func (client *Client) input() {
 				if len(data) > 0 {
 					codec := share.Codecs[res.SerializeType()]
 					if codec == nil {
-						call.Error = ServiceError(ErrUnsupportedCodec.Error())
+						call.Error = strErr(ErrUnsupportedCodec.Error())
 					} else {
 						err = codec.Decode(data, call.Reply)
 						if err != nil {
-							call.Error = ServiceError(err.Error())
+							call.Error = strErr(err.Error())
 						}
 					}
 				}
@@ -718,9 +682,7 @@ func (client *Client) input() {
 	}
 	// Terminate pending calls.
 
-	client.ServerMessageChanMu.RLock()
 	if client.ServerMessageChan != nil {
-		client.ServerMessageChanMu.RUnlock()
 		req := protocol.NewMessage()
 		req.SetMessageType(protocol.Request)
 		req.SetMessageStatusType(protocol.Error)
@@ -733,7 +695,6 @@ func (client *Client) input() {
 		req.Metadata["server"] = client.Conn.RemoteAddr().String()
 		client.handleServerRequest(req)
 	}
-	client.ServerMessageChanMu.RUnlock()
 
 	client.mutex.Lock()
 	if !client.pluginClosed {
@@ -760,7 +721,7 @@ func (client *Client) input() {
 	client.mutex.Unlock()
 
 	if err != nil && !closing {
-		log.Error("rpcx: client protocol error:", err)
+		log.Errorf("rpcx: client protocol error: %v", err)
 	}
 }
 
@@ -774,10 +735,14 @@ func (client *Client) handleServerRequest(msg *protocol.Message) {
 
 	serverMessageChan := client.ServerMessageChan
 	if serverMessageChan != nil {
-		select {
-		case serverMessageChan <- msg:
-		default:
-			log.Warnf("ServerMessageChan may be full so the server request %d has been dropped", msg.Seq())
+		if client.option.BidirectionalBlock {
+			serverMessageChan <- msg
+		} else {
+			select {
+			case serverMessageChan <- msg:
+			default:
+				log.Warnf("ServerMessageChan may be full so the server request %d has been dropped", msg.Seq())
+			}
 		}
 	}
 }

@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"reflect"
 	"regexp"
 	"runtime"
@@ -19,17 +18,21 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
-	"github.com/smallnest/rpcx/log"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
+	"github.com/alitto/pond"
+	"github.com/bitini111/rpcx/log"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/share"
+	"github.com/soheilhy/cmux"
 	"golang.org/x/net/websocket"
 )
 
 // ErrServerClosed is returned by the Server's Serve, ListenAndServe after a call to Shutdown or Close.
-var ErrServerClosed = errors.New("http: Server closed")
+var (
+	ErrServerClosed  = errors.New("http: Server closed")
+	ErrReqReachLimit = errors.New("request reached rate limit")
+)
 
 const (
 	// ReaderBuffsize is used for bufio reader.
@@ -37,8 +40,8 @@ const (
 	// WriterBuffsize is used for bufio writer.
 	WriterBuffsize = 1024
 
-	// WriteChanSize is used for response.
-	WriteChanSize = 1024 * 1024
+	// // WriteChanSize is used for response.
+	// WriteChanSize = 1024 * 1024
 )
 
 // contextKey is a value for use with context.WithValue. It's used as
@@ -72,9 +75,11 @@ type Server struct {
 	readTimeout        time.Duration
 	writeTimeout       time.Duration
 	gatewayHTTPServer  *http.Server
-	DisableHTTPGateway bool // should disable http invoke or not.
-	DisableJSONRPC     bool // should disable json rpc or not.
+	jsonrpcHTTPServer  *http.Server
+	DisableHTTPGateway bool // disable http invoke or not.
+	DisableJSONRPC     bool // disable json rpc or not.
 	AsyncWrite         bool // set true if your server only serves few clients
+	pool               *pond.WorkerPool
 
 	serviceMapMu sync.RWMutex
 	serviceMap   map[string]*service
@@ -105,7 +110,12 @@ type Server struct {
 
 	handlerMsgNum int32
 
+	// HandleServiceError is used to get all service errors. You can use it write logs or others.
 	HandleServiceError func(error)
+
+	// ServerErrorFunc is a customized error handlers and you can use it to return customized error strings to clients.
+	// If not set, it use err.Error()
+	ServerErrorFunc func(res *protocol.Message, err error) string
 }
 
 // NewServer returns a server.
@@ -117,7 +127,7 @@ func NewServer(options ...OptionFn) *Server {
 		doneChan:   make(chan struct{}),
 		serviceMap: make(map[string]*service),
 		router:     make(map[string]Handler),
-		AsyncWrite: true,
+		AsyncWrite: false, // 除非你想做进一步的优化测试，否则建议你设置为false
 	}
 
 	for _, op := range options {
@@ -159,7 +169,7 @@ func (s *Server) ActiveClientConn() []net.Conn {
 // The client is designated by the conn.
 // conn can be gotten from context in services:
 //
-//   ctx.Value(RemoteConnContextKey)
+//	ctx.Value(RemoteConnContextKey)
 //
 // servicePath, serviceMethod, metadata can be set to zero values.
 func (s *Server) SendMessage(conn net.Conn, servicePath, serviceMethod string, metadata map[string]string, data []byte) error {
@@ -191,44 +201,13 @@ func (s *Server) getDoneChan() <-chan struct{} {
 	return s.doneChan
 }
 
-// startShutdownListener start a new goroutine to notify SIGTERM
-// and SIGHUP signals and handle them gracefully
-func (s *Server) startShutdownListener() {
-	go func(s *Server) {
-		log.Info("server pid:", os.Getpid())
-
-		// channel to receive notifications of SIGTERM and SIGHUP
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGTERM, syscall.SIGHUP)
-
-		// custom functions to handle signal SIGTERM and SIGHUP
-		var customFuncs []func(s *Server)
-
-		switch <-ch {
-		case syscall.SIGTERM:
-			customFuncs = append(s.onShutdown, func(s *Server) {
-				s.Shutdown(context.Background())
-			})
-		case syscall.SIGHUP:
-			customFuncs = append(s.onRestart, func(s *Server) {
-				s.Restart(context.Background())
-			})
-		}
-
-		for _, fn := range customFuncs {
-			fn(s)
-		}
-	}(s)
-}
-
 // Serve starts and listens RPC requests.
 // It is blocked until receiving connections from clients.
 func (s *Server) Serve(network, address string) (err error) {
-	s.startShutdownListener()
 	var ln net.Listener
 	ln, err = s.makeListener(network, address)
 	if err != nil {
-		return
+		return err
 	}
 
 	if network == "http" {
@@ -250,7 +229,6 @@ func (s *Server) Serve(network, address string) (err error) {
 // ServeListener listens RPC requests.
 // It is blocked until receiving connections from clients.
 func (s *Server) ServeListener(network string, ln net.Listener) (err error) {
-	s.startShutdownListener()
 	if network == "http" {
 		s.serveByHTTP(ln, "")
 		return nil
@@ -275,10 +253,9 @@ func (s *Server) serveListener(ln net.Listener) error {
 	for {
 		conn, e := ln.Accept()
 		if e != nil {
-			select {
-			case <-s.getDoneChan():
+			if s.isShutdown() {
+				<-s.doneChan
 				return ErrServerClosed
-			default:
 			}
 
 			if ne, ok := e.(net.Error); ok && ne.Temporary() {
@@ -297,7 +274,7 @@ func (s *Server) serveListener(ln net.Listener) error {
 				continue
 			}
 
-			if strings.Contains(e.Error(), "listener closed") {
+			if errors.Is(e, cmux.ErrListenerClosed) {
 				return ErrServerClosed
 			}
 			return e
@@ -359,6 +336,43 @@ func (s *Server) serveByWS(ln net.Listener, rpcPath string) {
 	srv.Serve(ln)
 }
 
+func (s *Server) sendResponse(ctx *share.Context, conn net.Conn, err error, req, res *protocol.Message) {
+	if len(res.Payload) > 1024 && req.CompressType() != protocol.None {
+		res.SetCompressType(req.CompressType())
+	}
+
+	s.Plugins.DoPreWriteResponse(ctx, req, res, err)
+
+	data := res.EncodeSlicePointer()
+	if s.AsyncWrite {
+		if s.pool != nil {
+			s.pool.Submit(func() {
+				if s.writeTimeout != 0 {
+					conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+				}
+				conn.Write(*data)
+				protocol.PutData(data)
+			})
+		} else {
+			go func() {
+				if s.writeTimeout != 0 {
+					conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+				}
+				conn.Write(*data)
+				protocol.PutData(data)
+			}()
+		}
+
+	} else {
+		if s.writeTimeout != 0 {
+			conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+		}
+		conn.Write(*data)
+		protocol.PutData(data)
+	}
+	s.Plugins.DoPostWriteResponse(ctx, req, res, err)
+}
+
 func (s *Server) serveConn(conn net.Conn) {
 	if s.isShutdown() {
 		s.closeConn(conn)
@@ -381,6 +395,11 @@ func (s *Server) serveConn(conn net.Conn) {
 			log.Debugf("server closed conn: %v", conn.RemoteAddr().String())
 		}
 
+		// make sure all inflight requests are handled and all drained
+		if s.isShutdown() {
+			<-s.doneChan
+		}
+
 		s.closeConn(conn)
 	}()
 
@@ -399,13 +418,7 @@ func (s *Server) serveConn(conn net.Conn) {
 
 	r := bufio.NewReaderSize(conn, ReaderBuffsize)
 
-	var writeCh chan *[]byte
-	if s.AsyncWrite {
-		writeCh = make(chan *[]byte, WriteChanSize)
-		defer close(writeCh)
-		go s.serveAsyncWrite(conn, writeCh)
-	}
-
+	// read requests and handle it
 	for {
 		if s.isShutdown() {
 			return
@@ -416,24 +429,40 @@ func (s *Server) serveConn(conn net.Conn) {
 			conn.SetReadDeadline(t0.Add(s.readTimeout))
 		}
 
+		// create a rpcx Context
 		ctx := share.WithValue(context.Background(), RemoteConnContextKey, conn)
 
+		// read a request from the underlying connection
 		req, err := s.readRequest(ctx, r)
 		if err != nil {
-			protocol.FreeMsg(req)
-
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				log.Infof("client has closed this connection: %s", conn.RemoteAddr().String())
-			} else if strings.Contains(err.Error(), "use of closed network connection") {
+			} else if errors.Is(err, net.ErrClosed) {
 				log.Infof("rpcx: connection %s is closed", conn.RemoteAddr().String())
-			} else {
+			} else if errors.Is(err, ErrReqReachLimit) {
+				if !req.IsOneway() { // return a error response
+					res := req.Clone()
+					res.SetMessageType(protocol.Response)
+
+					s.handleError(res, err)
+					s.sendResponse(ctx, conn, err, req, res)
+					protocol.FreeMsg(res)
+				} else { // Oneway and only call the plugins
+					s.Plugins.DoPreWriteResponse(ctx, req, nil, err)
+				}
+				protocol.FreeMsg(req)
+				continue
+			} else { // wrong data
 				log.Warnf("rpcx: failed to read request: %v", err)
 			}
-			return
-		}
 
-		if s.writeTimeout != 0 {
-			conn.SetWriteDeadline(t0.Add(s.writeTimeout))
+			protocol.FreeMsg(req)
+
+			if s.HandleServiceError != nil {
+				s.HandleServiceError(err)
+			}
+
+			return
 		}
 
 		if share.Trace {
@@ -448,27 +477,22 @@ func (s *Server) serveConn(conn net.Conn) {
 		}
 
 		if err != nil {
-			if !req.IsOneway() {
+			if !req.IsOneway() { // return a error response
 				res := req.Clone()
 				res.SetMessageType(protocol.Response)
-				if len(res.Payload) > 1024 && req.CompressType() != protocol.None {
-					res.SetCompressType(req.CompressType())
-				}
-				handleError(res, err)
-				s.Plugins.DoPreWriteResponse(ctx, req, res, err)
-				data := res.EncodeSlicePointer()
-				if s.AsyncWrite {
-					writeCh <- data
-				} else {
-					conn.Write(*data)
-					protocol.PutData(data)
-				}
-				s.Plugins.DoPostWriteResponse(ctx, req, res, err)
+				s.handleError(res, err)
+				s.sendResponse(ctx, conn, err, req, res)
+
 				protocol.FreeMsg(res)
 			} else {
 				s.Plugins.DoPreWriteResponse(ctx, req, nil, err)
 			}
 			protocol.FreeMsg(req)
+
+			if s.HandleServiceError != nil {
+				s.HandleServiceError(err)
+			}
+
 			// auth failed, closed the connection
 			if closeConn {
 				log.Infof("auth failed for conn %s: %v", conn.RemoteAddr().String(), err)
@@ -476,112 +500,109 @@ func (s *Server) serveConn(conn net.Conn) {
 			}
 			continue
 		}
-		go func() {
-			atomic.AddInt32(&s.handlerMsgNum, 1)
-			defer atomic.AddInt32(&s.handlerMsgNum, -1)
 
-			if req.IsHeartbeat() {
-				s.Plugins.DoHeartbeatRequest(ctx, req)
-				req.SetMessageType(protocol.Response)
-				data := req.EncodeSlicePointer()
-				if s.AsyncWrite {
-					writeCh <- data
-				} else {
-					conn.Write(*data)
-					protocol.PutData(data)
-				}
-				protocol.FreeMsg(req)
-				return
-			}
-
-			resMetadata := make(map[string]string)
-			ctx = share.WithLocalValue(share.WithLocalValue(ctx, share.ReqMetaDataKey, req.Metadata),
-				share.ResMetaDataKey, resMetadata)
-
-			cancelFunc := parseServerTimeout(ctx, req)
-			if cancelFunc != nil {
-				defer cancelFunc()
-			}
-
-			s.Plugins.DoPreHandleRequest(ctx, req)
-
-			if share.Trace {
-				log.Debugf("server handle request %+v from conn: %v", req, conn.RemoteAddr().String())
-			}
-
-			// first use handler
-			if handler, ok := s.router[req.ServicePath+"."+req.ServiceMethod]; ok {
-				sctx := NewContext(ctx, conn, req, writeCh)
-				err := handler(sctx)
-				if err != nil {
-					log.Errorf("[handler internal error]: servicepath: %s, servicemethod, err: %v", req.ServicePath, req.ServiceMethod, err)
-				}
-
-				return
-			}
-
-			//
-			res, err := s.handleRequest(ctx, req)
-			if err != nil {
-				if s.HandleServiceError != nil {
-					s.HandleServiceError(err)
-				} else {
-					log.Warnf("rpcx: failed to handle request: %v", err)
-				}
-			}
-
-			s.Plugins.DoPreWriteResponse(ctx, req, res, err)
-			if !req.IsOneway() {
-				if len(resMetadata) > 0 { // copy meta in context to request
-					meta := res.Metadata
-					if meta == nil {
-						res.Metadata = resMetadata
-					} else {
-						for k, v := range resMetadata {
-							if meta[k] == "" {
-								meta[k] = v
-							}
-						}
-					}
-				}
-
-				if len(res.Payload) > 1024 && req.CompressType() != protocol.None {
-					res.SetCompressType(req.CompressType())
-				}
-				data := res.EncodeSlicePointer()
-				if s.AsyncWrite {
-					writeCh <- data
-				} else {
-					conn.Write(*data)
-					protocol.PutData(data)
-				}
-
-			}
-			s.Plugins.DoPostWriteResponse(ctx, req, res, err)
-
-			if share.Trace {
-				log.Debugf("server write response %+v for an request %+v from conn: %v", res, req, conn.RemoteAddr().String())
-			}
-
-			protocol.FreeMsg(req)
-			protocol.FreeMsg(res)
-		}()
+		if s.pool != nil {
+			s.pool.Submit(func() {
+				s.processOneRequest(ctx, req, conn)
+			})
+		} else {
+			go s.processOneRequest(ctx, req, conn)
+		}
 	}
 }
 
-func (s *Server) serveAsyncWrite(conn net.Conn, writeCh chan *[]byte) {
-	for {
-		select {
-		case <-s.doneChan:
-			return
-		case data := <-writeCh:
-			if data == nil {
-				return
-			}
-			conn.Write(*data)
-			protocol.PutData(data)
+func (s *Server) processOneRequest(ctx *share.Context, req *protocol.Message, conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 1024)
+			buf = buf[:runtime.Stack(buf, true)]
+
+			log.Errorf("failed to handle the request: %v， stacks: %s", r, buf)
+		}
+	}()
+
+	atomic.AddInt32(&s.handlerMsgNum, 1)
+	defer atomic.AddInt32(&s.handlerMsgNum, -1)
+
+	// 心跳请求，直接处理返回
+	if req.IsHeartbeat() {
+		s.Plugins.DoHeartbeatRequest(ctx, req)
+		req.SetMessageType(protocol.Response)
+		data := req.EncodeSlicePointer()
+
+		if s.writeTimeout != 0 {
+			conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+		}
+		conn.Write(*data)
+
+		protocol.PutData(data)
+		protocol.FreeMsg(req)
+
+		return
+	}
+
+	cancelFunc := parseServerTimeout(ctx, req)
+	if cancelFunc != nil {
+		defer cancelFunc()
+	}
+
+	resMetadata := make(map[string]string)
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]string)
+	}
+	ctx = share.WithLocalValue(share.WithLocalValue(ctx, share.ReqMetaDataKey, req.Metadata),
+		share.ResMetaDataKey, resMetadata)
+
+	s.Plugins.DoPreHandleRequest(ctx, req)
+
+	if share.Trace {
+		log.Debugf("server handle request %+v from conn: %v", req, conn.RemoteAddr().String())
+	}
+
+	// use handlers first
+	if handler, ok := s.router[req.ServicePath+"."+req.ServiceMethod]; ok {
+		sctx := NewContext(ctx, conn, req, s.AsyncWrite)
+		err := handler(sctx)
+		if err != nil {
+			log.Errorf("[handler internal error]: servicepath: %s, servicemethod, err: %v", req.ServicePath, req.ServiceMethod, err)
+		}
+
+		protocol.FreeMsg(req)
+		return
+	}
+
+	res, err := s.handleRequest(ctx, req)
+	if err != nil {
+		if s.HandleServiceError != nil {
+			s.HandleServiceError(err)
+		} else {
+			log.Warnf("rpcx: failed to handle request: %v", err)
 		}
 	}
+
+	if !req.IsOneway() {
+		if len(resMetadata) > 0 { // copy meta in context to responses
+			meta := res.Metadata
+			if meta == nil {
+				res.Metadata = resMetadata
+			} else {
+				for k, v := range resMetadata {
+					if meta[k] == "" {
+						meta[k] = v
+					}
+				}
+			}
+		}
+
+		s.sendResponse(ctx, conn, err, req, res)
+	}
+
+	if share.Trace {
+		log.Debugf("server write response %+v for an request %+v from conn: %v", res, req, conn.RemoteAddr().String())
+	}
+
+	protocol.FreeMsg(req)
+	protocol.FreeMsg(res)
 }
 
 func parseServerTimeout(ctx *share.Context, req *protocol.Message) context.CancelFunc {
@@ -662,7 +683,7 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 	s.serviceMapMu.RUnlock()
 	if service == nil {
 		err = errors.New("rpcx: can't find service " + serviceName)
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 	mtype := service.method[methodName]
 	if mtype == nil {
@@ -670,7 +691,7 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 			return s.handleRequestForFunction(ctx, req)
 		}
 		err = errors.New("rpcx: can't find method " + methodName)
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	// get a argv object from object pool
@@ -679,12 +700,12 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 	codec := share.Codecs[req.SerializeType()]
 	if codec == nil {
 		err = fmt.Errorf("can not find codec for %d", req.SerializeType())
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	err = codec.Decode(req.Payload, argv)
 	if err != nil {
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	// and get a reply object from object pool
@@ -694,7 +715,7 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 	if err != nil {
 		// return reply to object pool
 		reflectTypePools.Put(mtype.ReplyType, replyv)
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	if mtype.ArgType.Kind() != reflect.Ptr {
@@ -716,11 +737,11 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 			// return reply to object pool
 			reflectTypePools.Put(mtype.ReplyType, replyv)
 			if err != nil {
-				return handleError(res, err)
+				return s.handleError(res, err)
 			}
 			res.Payload = data
 		}
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	if !req.IsOneway() {
@@ -728,7 +749,7 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 		// return reply to object pool
 		reflectTypePools.Put(mtype.ReplyType, replyv)
 		if err != nil {
-			return handleError(res, err)
+			return s.handleError(res, err)
 		}
 		res.Payload = data
 	} else if replyv != nil {
@@ -754,12 +775,12 @@ func (s *Server) handleRequestForFunction(ctx context.Context, req *protocol.Mes
 	s.serviceMapMu.RUnlock()
 	if service == nil {
 		err = errors.New("rpcx: can't find service  for func raw function")
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 	mtype := service.function[methodName]
 	if mtype == nil {
 		err = errors.New("rpcx: can't find method " + methodName)
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	argv := reflectTypePools.Get(mtype.ArgType)
@@ -767,12 +788,12 @@ func (s *Server) handleRequestForFunction(ctx context.Context, req *protocol.Mes
 	codec := share.Codecs[req.SerializeType()]
 	if codec == nil {
 		err = fmt.Errorf("can not find codec for %d", req.SerializeType())
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	err = codec.Decode(req.Payload, argv)
 	if err != nil {
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	replyv := reflectTypePools.Get(mtype.ReplyType)
@@ -787,14 +808,14 @@ func (s *Server) handleRequestForFunction(ctx context.Context, req *protocol.Mes
 
 	if err != nil {
 		reflectTypePools.Put(mtype.ReplyType, replyv)
-		return handleError(res, err)
+		return s.handleError(res, err)
 	}
 
 	if !req.IsOneway() {
 		data, err := codec.Encode(replyv)
 		reflectTypePools.Put(mtype.ReplyType, replyv)
 		if err != nil {
-			return handleError(res, err)
+			return s.handleError(res, err)
 		}
 		res.Payload = data
 	} else if replyv != nil {
@@ -804,12 +825,18 @@ func (s *Server) handleRequestForFunction(ctx context.Context, req *protocol.Mes
 	return res, nil
 }
 
-func handleError(res *protocol.Message, err error) (*protocol.Message, error) {
+func (s *Server) handleError(res *protocol.Message, err error) (*protocol.Message, error) {
 	res.SetMessageStatusType(protocol.Error)
 	if res.Metadata == nil {
 		res.Metadata = make(map[string]string)
 	}
-	res.Metadata[protocol.ServiceError] = err.Error()
+
+	if s.ServerErrorFunc != nil {
+		res.Metadata[protocol.ServiceError] = s.ServerErrorFunc(res, err)
+	} else {
+		res.Metadata[protocol.ServiceError] = err.Error()
+	}
+
 	return res, err
 }
 
@@ -843,6 +870,7 @@ func (s *Server) ServeWS(conn *websocket.Conn) {
 	s.activeConn[conn] = struct{}{}
 	s.mu.Unlock()
 
+	conn.PayloadType = websocket.BinaryFrame
 	s.serveConn(conn)
 }
 
@@ -861,6 +889,11 @@ func (s *Server) Close() error {
 		s.Plugins.DoPostConnClose(c)
 	}
 	s.closeDoneChanLocked()
+
+	if s.pool != nil {
+		s.pool.StopAndWaitFor(10 * time.Second)
+	}
+
 	return err
 }
 
@@ -892,9 +925,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	var err error
 	if atomic.CompareAndSwapInt32(&s.inShutdown, 0, 1) {
 		log.Info("shutdown begin")
-
 		s.mu.Lock()
-		s.ln.Close()
+
+		// 主动注销注册的服务
+		if s.Plugins != nil {
+			for name := range s.serviceMap {
+				s.Plugins.DoUnregister(name)
+			}
+		}
+		if s.ln != nil {
+			s.ln.Close()
+		}
 		for conn := range s.activeConn {
 			if tcpConn, ok := conn.(*net.TCPConn); ok {
 				tcpConn.CloseRead()
@@ -926,6 +967,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			}
 		}
 
+		if s.jsonrpcHTTPServer != nil {
+			if err := s.closeJSONRPC2(ctx); err != nil {
+				log.Warnf("failed to close JSONRPC: %v", err)
+			} else {
+				log.Info("closed JSONRPC")
+			}
+		}
+
 		s.mu.Lock()
 		for conn := range s.activeConn {
 			conn.Close()
@@ -933,10 +982,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			s.Plugins.DoPostConnClose(conn)
 		}
 		s.closeDoneChanLocked()
+
 		s.mu.Unlock()
 
 		log.Info("shutdown end")
-
 	}
 	return err
 }
@@ -1004,4 +1053,18 @@ func validIP4(ipAddress string) bool {
 	ipAddress = ipAddress[:i] // remove port
 
 	return ip4Reg.MatchString(ipAddress)
+}
+
+func validIP6(ipAddress string) bool {
+	ipAddress = strings.Trim(ipAddress, " ")
+	i := strings.LastIndex(ipAddress, ":")
+	ipAddress = ipAddress[:i] // remove port
+	ipAddress = strings.TrimPrefix(ipAddress, "[")
+	ipAddress = strings.TrimSuffix(ipAddress, "]")
+	ip := net.ParseIP(ipAddress)
+	if ip != nil && ip.To4() == nil {
+		return true
+	} else {
+		return false
+	}
 }

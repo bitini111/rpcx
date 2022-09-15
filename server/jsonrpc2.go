@@ -3,15 +3,18 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/bitini111/rpcx/log"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/share"
 	"github.com/rs/cors"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
+	"github.com/soheilhy/cmux"
 )
 
 func (s *Server) jsonrpcHandler(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +160,7 @@ type CORSOptions struct {
 	// as argument and returns true if allowed or false otherwise. If this option is
 	// set, the content of AllowedOrigins is ignored.
 	AllowOriginFunc func(origin string) bool
-	// AllowOriginFunc is a custom function to validate the origin. It takes the HTTP Request object and the origin as
+	// AllowOriginRequestFunc is a custom function to validate the origin. It takes the HTTP Request object and the origin as
 	// argument and returns true if allowed or false otherwise. If this option is set, the content of `AllowedOrigins`
 	// and `AllowOriginFunc` is ignored.
 	AllowOriginRequestFunc func(r *http.Request, origin string) bool
@@ -181,6 +184,9 @@ type CORSOptions struct {
 	// OptionsPassthrough instructs preflight to let other potential next handlers to
 	// process the OPTIONS method. Turn this on if your application handles OPTIONS.
 	OptionsPassthrough bool
+	// Provides a status code to use for successful OPTIONS requests.
+	// Default value is http.StatusNoContent (204).
+	OptionsSuccessStatus int
 	// Debugging flag adds additional output to debug server side CORS issues
 	Debug bool
 }
@@ -228,11 +234,22 @@ func (s *Server) startJSONRPC2(ln net.Listener) {
 		c := cors.New(opt)
 		mux := c.Handler(newServer)
 		srv.Handler = mux
-
-		go srv.Serve(ln)
 	} else {
 		srv.Handler = newServer
-		go srv.Serve(ln)
 	}
 
+	s.jsonrpcHTTPServer = &srv
+	if err := s.jsonrpcHTTPServer.Serve(ln); !errors.Is(err, cmux.ErrServerClosed) {
+		log.Errorf("error in JSONRPC server: %T %s", err, err)
+	}
+}
+
+func (s *Server) closeJSONRPC2(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.jsonrpcHTTPServer != nil {
+		return s.jsonrpcHTTPServer.Shutdown(ctx)
+	}
+
+	return nil
 }

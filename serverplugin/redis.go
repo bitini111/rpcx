@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bitini111/rpcx/log"
 	metrics "github.com/rcrowley/go-metrics"
 	"github.com/rpcxio/libkv"
 	"github.com/rpcxio/libkv/store"
 	"github.com/rpcxio/libkv/store/redis"
-	"github.com/smallnest/rpcx/log"
 )
 
 func init() {
@@ -56,6 +56,7 @@ func (p *RedisRegisterPlugin) Start() error {
 		kv, err := libkv.NewStore(store.REDIS, p.RedisServers, p.Options)
 		if err != nil {
 			log.Errorf("cannot create redis registry: %v", err)
+			close(p.done)
 			return err
 		}
 		p.kv = kv
@@ -64,12 +65,15 @@ func (p *RedisRegisterPlugin) Start() error {
 	err := p.kv.Put(p.BasePath, []byte("rpcx_path"), &store.WriteOptions{IsDir: true})
 	if err != nil && !strings.Contains(err.Error(), "Not a file") {
 		log.Errorf("cannot create redis path %s: %v", p.BasePath, err)
+		close(p.done)
 		return err
 	}
 
 	if p.UpdateInterval > 0 {
-		ticker := time.NewTicker(p.UpdateInterval)
 		go func() {
+			ticker := time.NewTicker(p.UpdateInterval)
+
+			defer ticker.Stop()
 			defer p.kv.Close()
 
 			// refresh service TTL
@@ -248,7 +252,7 @@ func (p *RedisRegisterPlugin) Unregister(name string) (err error) {
 
 	err = p.kv.Delete(nodePath)
 	if err != nil {
-		log.Errorf("cannot create consul path %s: %v", nodePath, err)
+		log.Errorf("cannot remove redis path %s: %v", nodePath, err)
 		return err
 	}
 

@@ -8,10 +8,10 @@ import (
 
 	"fmt"
 
-	testutils "github.com/smallnest/rpcx/_testutils"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/server"
-	"github.com/smallnest/rpcx/share"
+	testutils "github.com/bitini111/rpcx/_testutils"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/server"
+	"github.com/bitini111/rpcx/share"
 )
 
 func TestXClient_Thrift(t *testing.T) {
@@ -110,7 +110,7 @@ func TestXClient_filterByStateAndGroup(t *testing.T) {
 }
 
 func TestUncoverError(t *testing.T) {
-	var e error = ServiceError("error")
+	var e error = strErr("error")
 	if uncoverError(e) {
 		t.Fatalf("expect false but get true")
 	}

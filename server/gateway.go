@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bitini111/rpcx/log"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/share"
 	"github.com/julienschmidt/httprouter"
 	"github.com/rs/cors"
-	"github.com/smallnest/rpcx/log"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
 	"github.com/soheilhy/cmux"
 )
 
@@ -77,7 +77,7 @@ func (s *Server) startHTTP1APIGateway(ln net.Listener) {
 	}
 
 	if err := s.gatewayHTTPServer.Serve(ln); err != nil {
-		if err == ErrServerClosed || strings.Contains(err.Error(), "listener closed") {
+		if err == ErrServerClosed || errors.Is(err, cmux.ErrListenerClosed) {
 			log.Info("gateway server closed")
 		} else {
 			log.Errorf("error in gateway Serve: %T %s", err, err)
@@ -149,7 +149,9 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 	}
 	err = s.Plugins.DoPostReadRequest(ctx, req, nil)
 	if err != nil {
+		s.Plugins.DoPreWriteResponse(ctx, req, nil, err)
 		http.Error(w, err.Error(), 500)
+		s.Plugins.DoPostWriteResponse(ctx, req, req.Clone(), err)
 		return
 	}
 
@@ -172,6 +174,8 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 	defer protocol.FreeMsg(res)
 
 	if err != nil {
+		// call DoPreWriteResponse
+		s.Plugins.DoPreWriteResponse(ctx, req, nil, err)
 		if s.HandleServiceError != nil {
 			s.HandleServiceError(err)
 		} else {
@@ -180,10 +184,13 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 		wh.Set(XMessageStatusType, "Error")
 		wh.Set(XErrorMessage, err.Error())
 		w.WriteHeader(500)
+		// call DoPostWriteResponse
+		s.Plugins.DoPostWriteResponse(ctx, req, req.Clone(), err)
 		return
 	}
 
-	s.Plugins.DoPreWriteResponse(newCtx, req, nil, nil)
+	// will set res to call
+	s.Plugins.DoPreWriteResponse(newCtx, req, res, nil)
 	if len(resMetadata) > 0 { // copy meta in context to request
 		meta := res.Metadata
 		if meta == nil {

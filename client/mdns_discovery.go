@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bitini111/rpcx/log"
 	"github.com/grandcat/zeroconf"
-	"github.com/smallnest/rpcx/log"
 )
 
 type serviceMeta struct {
@@ -18,7 +18,7 @@ type serviceMeta struct {
 }
 
 // MDNSDiscovery is a mdns service discovery.
-// It always returns the registered servers in etcd.
+// It always returns the registered servers in mdns.
 type MDNSDiscovery struct {
 	Timeout       time.Duration
 	WatchInterval time.Duration
@@ -37,7 +37,7 @@ type MDNSDiscovery struct {
 
 // NewMDNSDiscovery returns a new MDNSDiscovery.
 // If domain is empty, use "local." in default.
-func NewMDNSDiscovery(service string, timeout time.Duration, watchInterval time.Duration, domain string) (ServiceDiscovery, error) {
+func NewMDNSDiscovery(service string, timeout time.Duration, watchInterval time.Duration, domain string) (*MDNSDiscovery, error) {
 	if domain == "" {
 		domain = "local."
 	}

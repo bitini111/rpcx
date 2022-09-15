@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/smallnest/rpcx/log"
+	"github.com/bitini111/rpcx/log"
 )
 
 // MultipleServersDiscovery is a multiple servers service discovery.
@@ -18,7 +18,7 @@ type MultipleServersDiscovery struct {
 }
 
 // NewMultipleServersDiscovery returns a new MultipleServersDiscovery.
-func NewMultipleServersDiscovery(pairs []*KVPair) (ServiceDiscovery, error) {
+func NewMultipleServersDiscovery(pairs []*KVPair) (*MultipleServersDiscovery, error) {
 	return &MultipleServersDiscovery{
 		pairs: pairs,
 	}, nil

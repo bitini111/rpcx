@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/smallnest/rpcx/log"
-	"github.com/smallnest/rpcx/share"
+	"github.com/bitini111/rpcx/log"
+	"github.com/bitini111/rpcx/share"
 	"golang.org/x/net/websocket"
 )
 
@@ -22,61 +22,60 @@ var ConnFactories = map[string]ConnFactoryFn{
 	"kcp":  newDirectKCPConn,
 	"quic": newDirectQuicConn,
 	"unix": newDirectConn,
+	"memu": newMemuConn,
 }
 
 // Connect connects the server via specified network.
-func (c *Client) Connect(network, address string) error {
+func (client *Client) Connect(network, address string) error {
 	var conn net.Conn
 	var err error
 
 	switch network {
 	case "http":
-		conn, err = newDirectHTTPConn(c, network, address)
+		conn, err = newDirectHTTPConn(client, network, address)
 	case "ws", "wss":
-		conn, err = newDirectWSConn(c, network, address)
-	case "kcp":
-		conn, err = newDirectKCPConn(c, network, address)
-	case "quic":
-		conn, err = newDirectQuicConn(c, network, address)
-	case "unix":
-		conn, err = newDirectConn(c, network, address)
+		conn, err = newDirectWSConn(client, network, address)
 	default:
 		fn := ConnFactories[network]
 		if fn != nil {
-			conn, err = fn(c, network, address)
+			conn, err = fn(client, network, address)
 		} else {
-			conn, err = newDirectConn(c, network, address)
+			conn, err = newDirectConn(client, network, address)
 		}
 	}
 
 	if err == nil && conn != nil {
-		if tc, ok := conn.(*net.TCPConn); ok && c.option.TCPKeepAlivePeriod > 0 {
+		if tc, ok := conn.(*net.TCPConn); ok && client.option.TCPKeepAlivePeriod > 0 {
 			_ = tc.SetKeepAlive(true)
-			_ = tc.SetKeepAlivePeriod(c.option.TCPKeepAlivePeriod)
+			_ = tc.SetKeepAlivePeriod(client.option.TCPKeepAlivePeriod)
 		}
 
-		if c.option.IdleTimeout != 0 {
-			_ = conn.SetDeadline(time.Now().Add(c.option.IdleTimeout))
+		if client.option.IdleTimeout != 0 {
+			_ = conn.SetDeadline(time.Now().Add(client.option.IdleTimeout))
 		}
 
-		if c.Plugins != nil {
-			conn, err = c.Plugins.DoConnCreated(conn)
+		if client.Plugins != nil {
+			conn, err = client.Plugins.DoConnCreated(conn)
 			if err != nil {
 				return err
 			}
 		}
 
-		c.Conn = conn
-		c.r = bufio.NewReaderSize(conn, ReaderBuffsize)
+		client.Conn = conn
+		client.r = bufio.NewReaderSize(conn, ReaderBuffsize)
 		// c.w = bufio.NewWriterSize(conn, WriterBuffsize)
 
 		// start reading and writing since connected
-		go c.input()
+		go client.input()
 
-		if c.option.Heartbeat && c.option.HeartbeatInterval > 0 {
-			go c.heartbeat()
+		if client.option.Heartbeat && client.option.HeartbeatInterval > 0 {
+			go client.heartbeat()
 		}
 
+	}
+
+	if err != nil && client.Plugins != nil {
+		client.Plugins.DoConnCreateFailed(network, address)
 	}
 
 	return err
@@ -87,7 +86,12 @@ func newDirectConn(c *Client, network, address string) (net.Conn, error) {
 	var tlsConn *tls.Conn
 	var err error
 
-	if c != nil && c.option.TLSConfig != nil {
+	if c == nil {
+		err = fmt.Errorf("nil client")
+		return nil, err
+	}
+
+	if c.option.TLSConfig != nil {
 		dialer := &net.Dialer{
 			Timeout: c.option.ConnectTimeout,
 		}
@@ -139,6 +143,10 @@ func newDirectHTTPConn(c *Client, network, address string) (net.Conn, error) {
 
 	_, err = io.WriteString(conn, "CONNECT "+path+" HTTP/1.0\n\n")
 	if err != nil {
+		// Dial() success but Write() failed here, close the successfully
+		// created conn before return.
+		conn.Close()
+
 		log.Errorf("failed to make CONNECT: %v", err)
 		return nil, err
 	}
@@ -186,9 +194,9 @@ func newDirectWSConn(c *Client, network, address string) (net.Conn, error) {
 	}
 
 	if c.option.TLSConfig != nil {
-		config, err := websocket.NewConfig(url, origin)
-		if err != nil {
-			return nil, err
+		config, erri := websocket.NewConfig(url, origin)
+		if erri != nil {
+			return nil, erri
 		}
 		config.TlsConfig = c.option.TLSConfig
 		conn, err = websocket.DialConfig(config)

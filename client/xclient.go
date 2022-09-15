@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
+	ex "github.com/bitini111/rpcx/errors"
+	"github.com/bitini111/rpcx/log"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/share"
 	"github.com/juju/ratelimit"
-	ex "github.com/smallnest/rpcx/errors"
-	"github.com/smallnest/rpcx/log"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -33,8 +33,15 @@ var (
 	// ErrXClientNoServer selector can't found one server.
 	ErrXClientNoServer = errors.New("can not found any server")
 	// ErrServerUnavailable selected server is unavailable.
-	ErrServerUnavailable = errors.New("selected server is unavilable")
+	ErrServerUnavailable = errors.New("selected server is unavailable")
 )
+
+// Receipt represents the result of the service returned.
+type Receipt struct {
+	Address string
+	Reply   interface{}
+	Error   error
+}
 
 // XClient is an interface that used by client with service discovery and service governance.
 // One XClient is used only for one service. You should create multiple XClient for multiple services.
@@ -49,6 +56,7 @@ type XClient interface {
 	Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error
 	Broadcast(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error
 	Fork(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error
+	Inform(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) ([]Receipt, error)
 	SendRaw(ctx context.Context, r *protocol.Message) (map[string]string, []byte, error)
 	SendFile(ctx context.Context, fileName string, rateInBytesPerSecond int64, meta map[string]string) error
 	DownloadFile(ctx context.Context, requestFileName string, saveTo io.Writer, meta map[string]string) error
@@ -789,7 +797,10 @@ func (c *xClient) wrapCall(ctx context.Context, client RPCClient, serviceMethod 
 		log.Debugf("call a client for %s.%s, args: %+v in case of xclient wrapCall", c.servicePath, serviceMethod, args)
 	}
 
-	ctx = share.NewContext(ctx)
+	if _, ok := ctx.(*share.Context); !ok {
+		ctx = share.NewContext(ctx)
+	}
+
 	c.Plugins.DoPreCall(ctx, c.servicePath, serviceMethod, args)
 	err := client.Call(ctx, c.servicePath, serviceMethod, args, reply)
 	c.Plugins.DoPostCall(ctx, c.servicePath, serviceMethod, args, reply, err)
@@ -841,6 +852,8 @@ func (c *xClient) Broadcast(ctx context.Context, serviceMethod string, args inte
 		m[share.AuthKey] = c.auth
 	}
 
+	var replyOnce sync.Once
+
 	ctx = setServerTimeout(ctx)
 	callPlugins := make([]RPCClient, 0, len(c.servers))
 	clients := make(map[string]RPCClient)
@@ -874,7 +887,12 @@ func (c *xClient) Broadcast(ctx context.Context, serviceMethod string, args inte
 		k := k
 		client := client
 		go func() {
-			e := c.wrapCall(ctx, client, serviceMethod, args, reply)
+			var clonedReply interface{}
+			if reply != nil {
+				clonedReply = reflect.New(reflect.ValueOf(reply).Elem().Type()).Interface()
+			}
+
+			e := c.wrapCall(ctx, client, serviceMethod, args, clonedReply)
 			done <- (e == nil)
 			if e != nil {
 				if uncoverError(e) {
@@ -882,10 +900,16 @@ func (c *xClient) Broadcast(ctx context.Context, serviceMethod string, args inte
 				}
 				err.Append(e)
 			}
+
+			if e == nil && reply != nil && clonedReply != nil {
+				replyOnce.Do(func() {
+					reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(clonedReply).Elem())
+				})
+			}
 		}()
 	}
 
-	timeout := time.After(time.Minute)
+	timeout := time.NewTimer(time.Minute)
 check:
 	for {
 		select {
@@ -894,11 +918,12 @@ check:
 			if l == 0 || !result { // all returns or some one returns an error
 				break check
 			}
-		case <-timeout:
+		case <-timeout.C:
 			err.Append(errors.New(("timeout")))
 			break check
 		}
 	}
+	timeout.Stop()
 
 	if err.Error() == "[]" {
 		return nil
@@ -949,6 +974,8 @@ func (c *xClient) Fork(ctx context.Context, serviceMethod string, args interface
 		return ErrXClientNoServer
 	}
 
+	var replyOnce sync.Once
+
 	err := &ex.MultiError{}
 	l := len(clients)
 	done := make(chan bool, l)
@@ -963,7 +990,9 @@ func (c *xClient) Fork(ctx context.Context, serviceMethod string, args interface
 
 			e := c.wrapCall(ctx, client, serviceMethod, args, clonedReply)
 			if e == nil && reply != nil && clonedReply != nil {
-				reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(clonedReply).Elem())
+				replyOnce.Do(func() {
+					reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(clonedReply).Elem())
+				})
 			}
 			done <- (e == nil)
 			if e != nil {
@@ -975,7 +1004,7 @@ func (c *xClient) Fork(ctx context.Context, serviceMethod string, args interface
 		}()
 	}
 
-	timeout := time.After(time.Minute)
+	timeout := time.NewTimer(time.Minute)
 check:
 	for {
 		select {
@@ -988,17 +1017,131 @@ check:
 				break check
 			}
 
-		case <-timeout:
+		case <-timeout.C:
 			err.Append(errors.New(("timeout")))
 			break check
 		}
 	}
+	timeout.Stop()
 
 	if err.Error() == "[]" {
 		return nil
 	}
 
 	return err
+}
+
+// Inform sends requests to all servers and returns all results from services.
+// FailMode and SelectMode are meanless for this method.
+// Please set timeout to avoid hanging.
+func (c *xClient) Inform(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) ([]Receipt, error) {
+	if c.isShutdown {
+		return nil, ErrXClientShutdown
+	}
+
+	if c.auth != "" {
+		metadata := ctx.Value(share.ReqMetaDataKey)
+		if metadata == nil {
+			metadata = map[string]string{}
+			ctx = context.WithValue(ctx, share.ReqMetaDataKey, metadata)
+		}
+		m := metadata.(map[string]string)
+		m[share.AuthKey] = c.auth
+	}
+
+	ctx = setServerTimeout(ctx)
+	callPlugins := make([]RPCClient, 0, len(c.servers))
+	clients := make(map[string]RPCClient)
+	c.mu.Lock()
+	for k := range c.servers {
+		client, needCallPlugin, err := c.getCachedClientWithoutLock(k, c.servicePath, serviceMethod)
+		if err != nil {
+			continue
+		}
+		clients[k] = client
+		if needCallPlugin {
+			callPlugins = append(callPlugins, client)
+		}
+	}
+	c.mu.Unlock()
+
+	for i := range callPlugins {
+		if c.Plugins != nil {
+			c.Plugins.DoClientConnected(callPlugins[i].GetConn())
+		}
+	}
+
+	if len(clients) == 0 {
+		return nil, ErrXClientNoServer
+	}
+
+	var receiptsLock sync.Mutex
+	var receipts []Receipt
+
+	var replyOnce sync.Once
+
+	err := &ex.MultiError{}
+	l := len(clients)
+	done := make(chan bool, l)
+	for k, client := range clients {
+		k := k
+		client := client
+		go func() {
+			var clonedReply interface{}
+			if reply != nil {
+				clonedReply = reflect.New(reflect.ValueOf(reply).Elem().Type()).Interface()
+			}
+
+			e := c.wrapCall(ctx, client, serviceMethod, args, clonedReply)
+			done <- (e == nil)
+			if e != nil {
+				if uncoverError(e) {
+					c.removeClient(k, c.servicePath, serviceMethod, client)
+				}
+				err.Append(e)
+			}
+			if e == nil && reply != nil && clonedReply != nil {
+				replyOnce.Do(func() {
+					reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(clonedReply).Elem())
+				})
+			}
+
+			addr := k
+			ss := strings.SplitN(k, "@", 2)
+			if len(ss) == 2 {
+				addr = ss[1]
+			}
+			receiptsLock.Lock()
+
+			receipts = append(receipts, Receipt{
+				Address: addr,
+				Reply:   clonedReply,
+				Error:   err,
+			})
+			receiptsLock.Unlock()
+		}()
+	}
+
+	timeout := time.NewTimer(time.Minute)
+check:
+	for {
+		select {
+		case <-done:
+			l--
+			if l == 0 { // all returns or some one returns an error
+				break check
+			}
+		case <-timeout.C:
+			err.Append(errors.New(("timeout")))
+			break check
+		}
+	}
+	timeout.Stop()
+
+	if err.Error() == "[]" {
+		return receipts, nil
+	}
+	return receipts, err
 }
 
 // SendFile sends a local file to the server.
@@ -1069,7 +1212,7 @@ loop:
 			if n == 0 {
 				break loop
 			}
-			_, err = conn.Write(sendBuffer)
+			_, err = conn.Write(sendBuffer[:n])
 			if err != nil {
 				if err == io.EOF {
 					return nil
@@ -1136,7 +1279,7 @@ loop:
 	return err
 }
 
-// Close closes this client and its underlying connnections to services.
+// Close closes this client and its underlying connections to services.
 func (c *xClient) Close() error {
 	var errs []error
 	c.mu.Lock()

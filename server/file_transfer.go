@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bitini111/rpcx/log"
+	"github.com/bitini111/rpcx/share"
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/smallnest/rpcx/log"
-	"github.com/smallnest/rpcx/share"
 )
 
 // FileTransferHandler handles uploading file. Must close the connection after it finished.
@@ -42,6 +42,7 @@ type FileTransfer struct {
 
 	startOnce sync.Once
 
+	ln   net.Listener
 	done chan struct{}
 }
 
@@ -91,7 +92,9 @@ func (s *FileTransferService) TransferFile(ctx context.Context, args *share.File
 		reply.Addr = s.FileTransfer.AdvertiseAddr
 	}
 
-	s.FileTransfer.cachedTokens.Add(string(token), &tokenInfo{token, args})
+	cloned := args.Clone()
+	s.FileTransfer.cachedTokens.Add(string(token), &tokenInfo{token, cloned})
+
 	return nil
 }
 
@@ -111,7 +114,9 @@ func (s *FileTransferService) DownloadFile(ctx context.Context, args *share.Down
 		reply.Addr = s.FileTransfer.AdvertiseAddr
 	}
 
-	s.FileTransfer.cachedTokens.Add(string(token), &downloadTokenInfo{token, args})
+	cloned := args.Clone()
+	s.FileTransfer.cachedTokens.Add(string(token), &downloadTokenInfo{token, cloned})
+
 	return nil
 }
 
@@ -128,6 +133,7 @@ func (s *FileTransfer) start() error {
 	if err != nil {
 		return err
 	}
+	s.ln = ln
 
 	var tempDelay time.Duration
 
@@ -203,6 +209,10 @@ func (s *FileTransfer) start() error {
 
 func (s *FileTransfer) Stop() error {
 	close(s.done)
+	// notify Accept() to return
+	if s.ln != nil {
+		s.ln.Close()
+	}
 
 	return nil
 }

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/smallnest/rpcx/log"
+	"github.com/bitini111/rpcx/log"
 )
 
 // DNSDiscovery is based on DNS a record.
@@ -30,7 +30,7 @@ type DNSDiscovery struct {
 }
 
 // NewPeer2PeerDiscovery returns a new Peer2PeerDiscovery.
-func NewDNSDiscovery(domain string, network string, port int, d time.Duration) (ServiceDiscovery, error) {
+func NewDNSDiscovery(domain string, network string, port int, d time.Duration) (*DNSDiscovery, error) {
 	discovery := &DNSDiscovery{domain: domain, network: network, port: port, d: d}
 	discovery.lookup()
 	go discovery.watch()

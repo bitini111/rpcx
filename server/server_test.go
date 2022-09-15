@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	testutils "github.com/smallnest/rpcx/_testutils"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/share"
+	testutils "github.com/bitini111/rpcx/_testutils"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/share"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -159,7 +159,7 @@ func TestHandler(t *testing.T) {
 	}
 
 	go func() {
-		ctx := NewContext(share.NewContext(context.Background()), serverConn, req, nil)
+		ctx := NewContext(share.NewContext(context.Background()), serverConn, req, false)
 		err = handler(ctx)
 		assert.NoError(t, err)
 
@@ -177,4 +177,27 @@ func TestHandler(t *testing.T) {
 	assert.Equal(t, req.Seq(), resp.Seq())
 
 	assert.Equal(t, "{\"C\":200}", string(resp.Payload))
+}
+
+func Test_validIP6(t *testing.T) {
+	type args struct {
+		ipAddress string
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{"1", args{ipAddress: "[CDCD:910A:2222:5498:8475:1111:3900:2020]:8080"}, true},
+		{"2", args{ipAddress: "[1030::C9B4:FF12:48AA:1A2B]:8080"}, true},
+		{"3", args{ipAddress: "[2000:0:0:0:0:0:0:1]:8080"}, true},
+		{"4", args{ipAddress: "127.0.0.1:8080"}, false},
+		{"5", args{ipAddress: "localhost:8080"}, false},
+		{"6", args{ipAddress: "127.1:8080"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, validIP6(tt.args.ipAddress), "validIP6(%v)", tt.args.ipAddress)
+		})
+	}
 }

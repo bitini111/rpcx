@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	testutils "github.com/smallnest/rpcx/_testutils"
-	"github.com/smallnest/rpcx/protocol"
-	"github.com/smallnest/rpcx/server"
+	testutils "github.com/bitini111/rpcx/_testutils"
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/server"
 )
 
 type Args struct {
@@ -41,8 +41,6 @@ func (t *Arith) ThriftMul(ctx context.Context, args *testutils.ThriftArgs_, repl
 }
 
 func TestClient_IT(t *testing.T) {
-	server.UsePool = false
-
 	s := server.NewServer()
 	_ = s.RegisterName("Arith", new(Arith), "")
 	_ = s.RegisterName("PBArith", new(PBArith), "")

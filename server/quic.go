@@ -1,3 +1,4 @@
+//go:build quic
 // +build quic
 
 package server
@@ -6,7 +7,7 @@ import (
 	"errors"
 	"net"
 
-	"github.com/smallnest/quick"
+	"github.com/bitini111/quick"
 )
 
 func init() {

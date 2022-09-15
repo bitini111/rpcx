@@ -11,8 +11,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	rerrors "github.com/smallnest/rpcx/errors"
-	"github.com/smallnest/rpcx/log"
+	rerrors "github.com/bitini111/rpcx/errors"
+	"github.com/bitini111/rpcx/log"
 )
 
 // Precompute the reflect type for error. Can't use error directly
@@ -313,6 +313,8 @@ func suitableMethods(typ reflect.Type, reportErr bool) map[string]*methodType {
 // UnregisterAll unregisters all services.
 // You can call this method when you want to shutdown/upgrade this node.
 func (s *Server) UnregisterAll() error {
+	s.serviceMapMu.RLock()
+	defer s.serviceMapMu.RUnlock()
 	var es []error
 	for k := range s.serviceMap {
 		err := s.Plugins.DoUnregister(k)

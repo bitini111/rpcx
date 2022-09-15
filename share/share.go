@@ -1,8 +1,8 @@
 package share
 
 import (
-	"github.com/smallnest/rpcx/codec"
-	"github.com/smallnest/rpcx/protocol"
+	"github.com/bitini111/rpcx/codec"
+	"github.com/bitini111/rpcx/protocol"
 )
 
 const (
@@ -18,27 +18,20 @@ const (
 	// ServerTimeout timeout value passed from client to control timeout of server
 	ServerTimeout = "__ServerTimeout"
 
-	// OpentracingSpanServerKey key in service context
-	OpentracingSpanServerKey = "opentracing_span_server_key"
-	// OpentracingSpanClientKey key in client context
-	OpentracingSpanClientKey = "opentracing_span_client_key"
-
-	// OpencensusSpanServerKey key in service context
-	OpencensusSpanServerKey = "opencensus_span_server_key"
-	// OpencensusSpanClientKey key in client context
-	OpencensusSpanClientKey = "opencensus_span_client_key"
-	// OpencensusSpanRequestKey span key in request meta
-	OpencensusSpanRequestKey = "opencensus_span_request_key"
-
 	// SendFileServiceName is name of the file transfer service.
 	SendFileServiceName = "_filetransfer"
 
 	// StreamServiceName is name of the stream service.
 	StreamServiceName = "_streamservice"
+
+	// ContextTagsLock is name of the Context TagsLock.
+	ContextTagsLock = "_tagsLock"
+	// _isShareContext indicates this context is share.Contex.
+	isShareContext = "_isShareContext"
 )
 
 // Trace is a flag to write a trace log or not.
-// You should not enable this flag ofr product environment and enable it only for test.
+// You should not enable this flag for product environment and enable it only for test.
 // It writes trace log with logger Debug level.
 var Trace bool
 
@@ -59,10 +52,10 @@ func RegisterCodec(t protocol.SerializeType, c codec.Codec) {
 // ContextKey defines key type in context.
 type ContextKey string
 
-// ReqMetaDataKey is used to set metatdata in context of requests.
+// ReqMetaDataKey is used to set metadata in context of requests.
 var ReqMetaDataKey = ContextKey("__req_metadata")
 
-// ResMetaDataKey is used to set metatdata in context of responses.
+// ResMetaDataKey is used to set metadata in context of responses.
 var ResMetaDataKey = ContextKey("__res_metadata")
 
 // FileTransferArgs args from clients.
@@ -70,6 +63,20 @@ type FileTransferArgs struct {
 	FileName string            `json:"file_name,omitempty"`
 	FileSize int64             `json:"file_size,omitempty"`
 	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+// Clone clones this DownloadFileArgs.
+func (args FileTransferArgs) Clone() *FileTransferArgs {
+	meta := make(map[string]string)
+	for k, v := range args.Meta {
+		meta[k] = v
+	}
+
+	return &FileTransferArgs{
+		FileName: args.FileName,
+		FileSize: args.FileSize,
+		Meta:     meta,
+	}
 }
 
 // FileTransferReply response to token and addr to clients.
@@ -82,6 +89,19 @@ type FileTransferReply struct {
 type DownloadFileArgs struct {
 	FileName string            `json:"file_name,omitempty"`
 	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+// Clone clones this DownloadFileArgs.
+func (args DownloadFileArgs) Clone() *DownloadFileArgs {
+	meta := make(map[string]string)
+	for k, v := range args.Meta {
+		meta[k] = v
+	}
+
+	return &DownloadFileArgs{
+		FileName: args.FileName,
+		Meta:     meta,
+	}
 }
 
 // StreamServiceArgs is the request type for stream service.

@@ -4,11 +4,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/bitini111/rpcx/protocol"
+	"github.com/bitini111/rpcx/server"
 	"github.com/juju/ratelimit"
-	"github.com/syndtr/goleveldb/leveldb/errors"
 )
-
-var ErrReqReachLimit = errors.New("request reached rate limit")
 
 // ReqRateLimitingPlugin can limit requests per unit time
 type ReqRateLimitingPlugin struct {
@@ -30,8 +29,8 @@ func NewReqRateLimitingPlugin(fillInterval time.Duration, capacity int64, block 
 	}
 }
 
-// PreReadRequest can limit request processing.
-func (plugin *ReqRateLimitingPlugin) PreReadRequest(ctx context.Context) error {
+// PostReadRequest can limit request processing.
+func (plugin *ReqRateLimitingPlugin) PostReadRequest(ctx context.Context, r *protocol.Message, e error) error {
 	if plugin.block {
 		plugin.bucket.Wait(1)
 		return nil
@@ -41,5 +40,5 @@ func (plugin *ReqRateLimitingPlugin) PreReadRequest(ctx context.Context) error {
 	if count == 1 {
 		return nil
 	}
-	return ErrReqReachLimit
+	return server.ErrReqReachLimit
 }

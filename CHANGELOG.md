@@ -1,6 +1,19 @@
 # [rpcx](http://rpcx.io)
 
-## 1.7.0 (developing)
+## 1.8.0
+- supports distributed rate limiter based on go-redis/redis-rate
+- move zookeeper plugin to https://github.com/bitini111/rpcx-zookeepr
+- move consul plugin to https://github.com/bitini111/rpcx-consul
+- move redis plugin to https://github.com/bitini111/rpcx-redis
+- move influxd/opentelemetry plugin to https://github.com/bitini111/rpcx-plugins
+- you can write customized error, for example `{"code": 500, err: "internal error"}`
+- server support the work pool by `WithPool`
+- support to write services like `go std http router` style without reflect
+- simplify async write for service
+- improve performance
+
+
+## 1.7.0
 - move etcd support to github.com/rpcxio/rpcx-etcd
 - Broken API: NewXXXDiscovery returns error instead of panic
 - support AdvertiseAddr in FileTransfer
@@ -13,8 +26,12 @@
 - support websocket as the transport like tcp,kcp and quic
 - add CMuxPlugin to allow developing customzied services by using the same single port
 - re-tag rpcx to make sure the version is less than 2 (for go module)
-- support visit grpc services by rpcx clients
+- support visit grpc services by rpcx clients: https://github.com/rpcxio/rpcxplus/tree/master/grpcx
 - support configing grpc servicves in rpcx server side
+- improve rpcx performance
+- add Inform method in XClient
+- add memory connection for unit tests
+- supports opentelemetry
 
 ## 1.6.0 
 
@@ -64,7 +81,7 @@
 - Support dynamic port allocation
 - Use go module to manage dependencies
 - Support shutdown graceful
-- Add [rpcx-java](https://github.com/smallnest/rpcx-java) to support develop raw java services and clients
+- Add [rpcx-java](https://github.com/bitini111/rpcx-java) to support develop raw java services and clients
 - Support thrift codec 
 - Setup rpcx offcial site: http://rpcx.io
 - Add Chinese document: http://cn.doc.rpcx.io or https://smallnest.gitbooks.io/go-rpc-programming-guide
@@ -83,7 +100,7 @@ fix bugs.
 
 - Rewrite rpcx. It implements its protocol and won't implemented based on wrapper of go standard rpc lib
 - Add go tags for pluggable plugins
-- Add English document: https://github.com/smallnest/rpcx-programming
+- Add English document: https://github.com/bitini111/rpcx-programming
 - Add rpcx 3.0 examples: https://github.com/rpcxio/rpcx-examples
 
 rpcx 3.0 is not compatible with rpcx 2.0 and below

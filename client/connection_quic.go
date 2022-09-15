@@ -1,3 +1,4 @@
+//go:build quic
 // +build quic
 
 package client
@@ -8,7 +9,7 @@ import (
 
 	"github.com/lucas-clemente/quic-go"
 
-	"github.com/smallnest/quick"
+	"github.com/bitini111/quick"
 )
 
 func newDirectQuicConn(c *Client, network, address string) (net.Conn, error) {
@@ -21,9 +22,7 @@ func newDirectQuicConn(c *Client, network, address string) (net.Conn, error) {
 		tlsConf.NextProtos = []string{"rpcx"}
 	}
 
-	quicConfig := &quic.Config{
-		KeepAlive: c.option.Heartbeat,
-	}
+	quicConfig := &quic.Config{}
 
 	return quick.Dial(address, tlsConf, quicConfig)
 }
