@@ -1,28 +1,56 @@
+// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
+//
+// This Source Code Form is subject to the terms of the MIT License.
+// If a copy of the MIT was not distributed with this file,
+// You can obtain one at https://github.com/gogf/gf.
+
+// Package gerror provides rich functionalities to manipulate errors.
+//
+// For maintainers, please very note that,
+// this package is quite a basic package, which SHOULD NOT import extra packages
+// except standard packages and internal packages, to avoid cycle imports.
 package errors
 
-import (
-	"fmt"
-	"sync"
-)
+import "github.com/gogf/gf/v2/errors/gcode"
 
-// MultiError holds multiple errors
-type MultiError struct {
-	Errors []error
-	mu     sync.Mutex
+// IIs is the interface for Is feature.
+type IIs interface {
+	Error() string
+	Is(target error) bool
 }
 
-// Error returns the message of the actual error
-func (e *MultiError) Error() string {
-	return fmt.Sprintf("%v", e.Errors)
+// IEqual is the interface for Equal feature.
+type IEqual interface {
+	Error() string
+	Equal(target error) bool
 }
 
-func (e *MultiError) Append(err error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.Errors = append(e.Errors, err)
+// ICode is the interface for Code feature.
+type ICode interface {
+	Error() string
+	Code() gcode.Code
 }
 
-// NewMultiError creates and returns an Error with error splice
-func NewMultiError(errors []error) *MultiError {
-	return &MultiError{Errors: errors}
+// IStack is the interface for Stack feature.
+type IStack interface {
+	Error() string
+	Stack() string
+}
+
+// ICause is the interface for Cause feature.
+type ICause interface {
+	Error() string
+	Cause() error
+}
+
+// ICurrent is the interface for Current feature.
+type ICurrent interface {
+	Error() string
+	Current() error
+}
+
+// IUnwrap is the interface for Unwrap feature.
+type IUnwrap interface {
+	Error() string
+	Unwrap() error
 }
