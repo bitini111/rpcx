@@ -4,7 +4,7 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-package errors
+package error
 
 // MarshalJSON implements the interface MarshalJSON for json.Marshal.
 // Note that do not use pointer as its receiver here.

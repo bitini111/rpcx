@@ -1,7 +1,8 @@
-package errors
+package error
 
 import (
 	"fmt"
+
 	"github.com/bitini111/rpcx/errors/code"
 )
 

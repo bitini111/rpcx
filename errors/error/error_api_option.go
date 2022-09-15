@@ -4,16 +4,16 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-package errors
+package error
 
 import "github.com/bitini111/rpcx/errors/code"
 
 // Option is option for creating error.
 type Option struct {
-	Error error      // Wrapped error if any.
-	Stack bool       // Whether recording stack information into error.
-	Text  string     // Error text, which is created by New* functions.
-	Code  gcode.Code // Error code if necessary.
+	Error error     // Wrapped error if any.
+	Stack bool      // Whether recording stack information into error.
+	Text  string    // Error text, which is created by New* functions.
+	Code  code.Code // Error code if necessary.
 }
 
 // NewOption creates and returns a custom error with Option.
