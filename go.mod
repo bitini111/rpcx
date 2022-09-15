@@ -28,7 +28,7 @@ require (
 	github.com/rpcxio/libkv v0.5.1
 	github.com/rs/cors v1.8.2
 	github.com/rubyist/circuitbreaker v2.2.1+incompatible
-	github.com/bitini111/quick v0.0.0-20220703133648-f13409fa6c67
+	github.com/smallnest/quick v0.0.0-20220703133648-f13409fa6c67
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.7.2
 	github.com/tinylib/msgp v1.1.6
