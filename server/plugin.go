@@ -2,11 +2,10 @@ package server
 
 import (
 	"context"
-	"net"
-
-	"github.com/bitini111/rpcx/errors"
+	errors "github.com/bitini111/rpcx/errors/error"
 	"github.com/bitini111/rpcx/protocol"
 	"github.com/soheilhy/cmux"
+	"net"
 )
 
 // PluginContainer represents a plugin container that defines all methods to manage plugins.

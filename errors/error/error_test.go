@@ -13,3 +13,12 @@ func TestNewError(t *testing.T) {
 	fmt.Println(err.Error())
 	fmt.Println(error.Code(err))
 }
+
+func TestNewNil(t *testing.T) {
+	err := error.New("")
+	fmt.Println(err.Error())
+	if err.Error() == "" {
+		fmt.Println("ok")
+	}
+
+}

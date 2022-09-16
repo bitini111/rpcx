@@ -18,7 +18,7 @@ type Error struct {
 
 const (
 	// Filtering key for current error module paths.
-	stackFilterKeyLocal = "/errors/gerror/gerror"
+	stackFilterKeyLocal = "/errors/error/error"
 )
 
 var (

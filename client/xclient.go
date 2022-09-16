@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	ex "github.com/bitini111/rpcx/errors"
+	ex "github.com/bitini111/rpcx/errors/error"
 	"github.com/bitini111/rpcx/log"
 	"github.com/bitini111/rpcx/protocol"
 	"github.com/bitini111/rpcx/share"
