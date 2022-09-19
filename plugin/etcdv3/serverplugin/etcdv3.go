@@ -70,6 +70,19 @@ type EtcdV3RegisterPlugin struct {
 	done  chan struct{}
 }
 
+func NewEtcdV3Plugin(serviceAddress string, etcdServers []string, BasePath string, version string, serverID int32) *EtcdV3RegisterPlugin {
+	item := &EtcdV3RegisterPlugin{
+		ServiceAddress: serviceAddress, //服务监听的ip端口
+		EtcdServers:    etcdServers,    //zookeeper地址
+		BasePath:       BasePath,       //zk的目录
+		Metrics:        metrics.NewRegistry(),
+		Version:        version,         //rpc的版本
+		ServerID:       int64(serverID), //rpc的svrid
+		//UpdateInterval: time.Minute,
+	}
+	return item
+}
+
 // Start starts to connect etcd cluster
 func (p *EtcdV3RegisterPlugin) Start() error {
 	if p.Expired == 0 {
