@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	estore "github.com/bitini111/rpcx/plugin/etcdv3/store"
+	"github.com/bitini111/rpcx/plugin/etcdv3/store/etcdv3"
+	"github.com/rpcxio/libkv"
+	"github.com/rpcxio/libkv/store"
 	"net"
 	"sort"
 	"strconv"
@@ -16,14 +20,10 @@ import (
 
 	"github.com/bitini111/rpcx/log"
 	metrics "github.com/rcrowley/go-metrics"
-	"github.com/rpcxio/libkv"
-	"github.com/rpcxio/libkv/store"
-	estore "github.com/rpcxio/rpcx-etcd/store"
-	etcd "github.com/rpcxio/rpcx-etcd/store/etcdv3"
 )
 
 func init() {
-	etcd.Register()
+	etcdv3.Register()
 }
 
 type etcdInfo struct {
@@ -309,7 +309,7 @@ func (p *EtcdV3RegisterPlugin) Register(name string, rcvr interface{}, metadata 
 	}
 
 	if p.kv == nil {
-		etcd.Register()
+		etcdv3.Register()
 		kv, err := libkv.NewStore(estore.ETCDV3, p.EtcdServers, nil)
 		if err != nil {
 			log.Errorf("cannot create etcd registry: %v", err)
@@ -360,7 +360,7 @@ func (p *EtcdV3RegisterPlugin) Unregister(name string) (err error) {
 	}
 
 	if p.kv == nil {
-		etcd.Register()
+		etcdv3.Register()
 		kv, err := libkv.NewStore(estore.ETCDV3, p.EtcdServers, nil)
 		if err != nil {
 			log.Errorf("cannot create etcd registry: %v", err)

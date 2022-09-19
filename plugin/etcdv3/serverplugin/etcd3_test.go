@@ -2,6 +2,7 @@ package serverplugin
 
 import (
 	"fmt"
+	"github.com/bitini111/rpcx/plugin/common/serverplugin"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ func TestEtcdV3Registry(t *testing.T) {
 
 	name := fmt.Sprintf("%s/%s/%d#%s", r.BasePath, r.ServiceName, r.ServerID, r.Version)
 
-	s.RegisterName(name, new(Arith), "")
+	s.RegisterName(name, new(serverplugin.Arith), "")
 	go s.Serve("ws", "192.168.8.136:8972")
 	defer s.Close()
 

@@ -4,21 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/bitini111/rpcx/client"
+	"github.com/bitini111/rpcx/log"
+	estore "github.com/bitini111/rpcx/plugin/etcdv3/store"
+	"github.com/bitini111/rpcx/plugin/etcdv3/store/etcdv3"
+	"github.com/rpcxio/libkv"
+	"github.com/rpcxio/libkv/store"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rpcxio/libkv"
-	"github.com/rpcxio/libkv/store"
-	estore "github.com/rpcxio/rpcx-etcd/store"
-	etcd "github.com/rpcxio/rpcx-etcd/store/etcdv3"
-	"github.com/smallnest/rpcx/client"
-	"github.com/smallnest/rpcx/log"
 )
 
 func init() {
-	etcd.Register()
+	etcdv3.Register()
 }
 
 type etcdDiscoverVersIP struct {
@@ -66,7 +65,7 @@ func NewEtcdV3Discovery(basePath string, servicePath string, etcdAddr []string, 
 		panic(err)
 	}
 
-	if ev3, ok := kv.(*etcd.EtcdV3); ok {
+	if ev3, ok := kv.(*etcdv3.EtcdV3); ok {
 		ev3.AllowKeyNotFound = allowKeyNotFound
 	}
 
@@ -213,7 +212,7 @@ func NewEtcdV3DiscoveryTemplate(basePath string, servicePath string, etcdAddr []
 		return nil, err
 	}
 
-	if ev3, ok := kv.(*etcd.EtcdV3); ok {
+	if ev3, ok := kv.(*etcdv3.EtcdV3); ok {
 		ev3.AllowKeyNotFound = allowKeyNotFound
 	}
 
