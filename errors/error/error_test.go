@@ -21,27 +21,3 @@ func TestNewNil(t *testing.T) {
 		fmt.Println("ok")
 	}
 }
-
-func TestWrapError(t *testing.T) {
-
-	//OpenFile := func() error {
-	//	return error.New("permission denied")
-	//}
-	//
-	//OpenConfig := func() error {
-	//	return error.Wrap(OpenFile(), "configuration file opening failed")
-	//}
-	//
-	//ReadConfig := func() error {
-	//	return error.Wrap(OpenConfig(), "reading configuration failed")
-	//}
-	//
-	//fmt.Printf("%+v", ReadConfig())
-
-	// err := error.New("")
-	// fmt.Println(err.Error())
-	// if err.Error() == "" {
-	// 	fmt.Println("ok")
-	// }
-
-}

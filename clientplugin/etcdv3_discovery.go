@@ -1,4 +1,4 @@
-package client
+package clientplugin
 
 import (
 	"bytes"
@@ -85,7 +85,7 @@ func NewEtcdV3DiscoveryStore(basePath string, servicePath string, kv store.Store
 		basePath = basePath[1:]
 	}
 
-	nodePath:=basePath + "/" + servicePath
+	nodePath := basePath + "/" + servicePath
 	d := &EtcdV3Discovery{basePath: nodePath, kv: kv}
 	d.stopCh = make(chan struct{})
 
@@ -99,12 +99,12 @@ func NewEtcdV3DiscoveryStore(basePath string, servicePath string, kv store.Store
 
 	var realIPPORT []*store.KVPair
 
-	nodeLen:=len(nodePath)
+	nodeLen := len(nodePath)
 	for _, p := range ps {
-		if nodeLen>=len(p.Key){
+		if nodeLen >= len(p.Key) {
 			continue
 		}
-		key:=p.Key[nodeLen+1:len(p.Key)]
+		key := p.Key[nodeLen+1 : len(p.Key)]
 		var ID int
 		ID, err = strconv.Atoi(key)
 		if ID <= 0 {
@@ -113,7 +113,7 @@ func NewEtcdV3DiscoveryStore(basePath string, servicePath string, kv store.Store
 
 		//Get All the Versions of the ID
 		//BASE/L/ServerName/ServerID
-		strPerID := fmt.Sprintf("%s/%d",nodePath,ID)
+		strPerID := fmt.Sprintf("%s/%d", nodePath, ID)
 		VersionPerID, err := kv.Get(strPerID)
 		if err != nil {
 			log.Infof("get kv.Get path:%s, err: %v", strPerID, err)
@@ -281,7 +281,6 @@ func (d *EtcdV3Discovery) watch() {
 		d.kv.Close()
 	}()
 
-
 	for {
 		var err error
 		var c <-chan []*store.KVPair
@@ -332,7 +331,7 @@ func (d *EtcdV3Discovery) watch() {
 				}
 
 				for _, p := range ps {
-					arr:=strings.Split(p.Key,"/")
+					arr := strings.Split(p.Key, "/")
 					var ID int
 					ID, err = strconv.Atoi(arr[len(arr)-1])
 					if ID <= 0 {
