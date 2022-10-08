@@ -4,16 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/bitini111/rpcx/client"
 	"github.com/bitini111/rpcx/log"
 	estore "github.com/bitini111/rpcx/plugin/etcdv3/store"
 	"github.com/bitini111/rpcx/plugin/etcdv3/store/etcdv3"
 	"github.com/rpcxio/libkv"
 	"github.com/rpcxio/libkv/store"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 func init() {
@@ -322,12 +323,12 @@ func (d *EtcdV3Discovery) watch() {
 					break rewatch
 				}
 				var pairs []*client.KVPair // latest servers
-				if ps == nil && !d.AllowKeyNotFound {
-					d.pairsMu.Lock()
-					d.pairs = pairs
-					d.pairsMu.Unlock()
-					continue
-				}
+				// if ps == nil && !d.AllowKeyNotFound {
+				// 	d.pairsMu.Lock()
+				// 	d.pairs = pairs
+				// 	d.pairsMu.Unlock()
+				// 	continue
+				// }
 
 				for _, p := range ps {
 					arr := strings.Split(p.Key, "/")
@@ -360,11 +361,11 @@ func (d *EtcdV3Discovery) watch() {
 
 					//pairs = append(pairs, &KVPair{Key: p.Key, Value: string(p.Value)})
 				}
-				d.pairsMu.Lock()
+				// d.pairsMu.Lock()
 				d.pairs = pairs
-				d.pairsMu.Unlock()
+				// d.pairsMu.Unlock()
 
-				d.mu.Lock()
+				// d.mu.Lock()
 				for _, ch := range d.chans {
 					ch := ch
 					go func() {
@@ -379,7 +380,7 @@ func (d *EtcdV3Discovery) watch() {
 						}
 					}()
 				}
-				d.mu.Unlock()
+				// d.mu.Unlock()
 			}
 		}
 	}
