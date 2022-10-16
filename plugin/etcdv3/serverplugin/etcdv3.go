@@ -7,16 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	estore "github.com/bitini111/rpcx/plugin/etcdv3/store"
-	"github.com/bitini111/rpcx/plugin/etcdv3/store/etcdv3"
-	"github.com/rpcxio/libkv"
-	"github.com/rpcxio/libkv/store"
 	"net"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	estore "github.com/bitini111/rpcx/plugin/etcdv3/store"
+	"github.com/bitini111/rpcx/plugin/etcdv3/store/etcdv3"
+	"github.com/rpcxio/libkv"
+	"github.com/rpcxio/libkv/store"
 
 	"github.com/bitini111/rpcx/log"
 	metrics "github.com/rcrowley/go-metrics"
@@ -70,13 +71,14 @@ type EtcdV3RegisterPlugin struct {
 	done  chan struct{}
 }
 
-func NewEtcdV3Plugin(serviceAddress string, etcdServers []string, BasePath string, version string, serverID int32) *EtcdV3RegisterPlugin {
+func NewEtcdV3Plugin(serviceAddress string, etcdServers []string, BasePath string, serverName, version string, serverID int32) *EtcdV3RegisterPlugin {
 	item := &EtcdV3RegisterPlugin{
 		ServiceAddress: serviceAddress, //服务监听的ip端口
-		EtcdServers:    etcdServers,    //zookeeper地址
-		BasePath:       BasePath,       //zk的目录
+		EtcdServers:    etcdServers,    //etcd地址
+		BasePath:       BasePath,       //etcd的目录
 		Metrics:        metrics.NewRegistry(),
-		Version:        version,         //rpc的版本
+		Version:        version, //rpc的版本
+		ServiceName:    serverName,
 		ServerID:       int64(serverID), //rpc的svrid
 		//UpdateInterval: time.Minute,
 	}
