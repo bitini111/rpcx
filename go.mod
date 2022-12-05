@@ -9,6 +9,7 @@ require (
 	github.com/apache/thrift v0.16.0
 	github.com/edwingeng/doublejump v1.0.0
 	github.com/fatih/color v1.13.0
+	github.com/globalsign/mgo v0.0.0-20181015135952-eeefdecb41b8
 	github.com/go-ping/ping v1.1.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/go-redis/redis_rate/v9 v9.1.2
@@ -24,6 +25,7 @@ require (
 	github.com/kavu/go_reuseport v1.5.0
 	github.com/kr/pretty v0.2.0
 	github.com/lucas-clemente/quic-go v0.28.0
+	github.com/pkg/errors v0.9.1
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475
 	github.com/rpcxio/libkv v0.5.1
 	github.com/rs/cors v1.8.2
@@ -74,7 +76,6 @@ require (
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/peterbourgon/g2s v0.0.0-20140925154142-ec76db4c1ac1 // indirect
 	github.com/philhofer/fwd v1.1.1 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/templexxx/cpufeat v0.0.0-20180724012125-cef66df7f161 // indirect
 	github.com/templexxx/xor v0.0.0-20191217153810-f85b25db303b // indirect
